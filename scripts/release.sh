@@ -49,3 +49,9 @@ git tag "v$VERSION"
 git push origin "v$VERSION"
 gh release create "v$VERSION" "$ZIP" --title "Quill $VERSION" --generate-notes
 echo "released v$VERSION"
+
+# The Homebrew cask needs the zip's hash. Update the local file; the tap repo is pushed by hand.
+SHA=$(shasum -a 256 "$ZIP" | awk '{print $1}')
+echo "sha256 $SHA"
+sed -i '' -E "s/^( *version) \".*\"/\1 \"$VERSION\"/; s/^( *sha256) \".*\"/\1 \"$SHA\"/" Casks/quill.rb
+echo "updated Casks/quill.rb (version $VERSION); commit it and copy it to millwright-software/homebrew-tap (not pushed)"
