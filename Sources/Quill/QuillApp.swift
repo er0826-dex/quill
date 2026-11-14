@@ -85,7 +85,7 @@ struct MenuContent: View {
     @Environment(\.openWindow) private var openWindow
 
     /// Option held while opening the menu shows the developer items (timings, log, re-transcribe…).
-    private var developer: Bool { NSEvent.modifierFlags.contains(.option) }
+    private var developer: Bool { model.developerMenu }
 
     var body: some View {
         // Only say something when there's something to say; "Ready" is the quiet default.

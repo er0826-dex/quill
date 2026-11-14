@@ -45,6 +45,10 @@ final class AppModel: ObservableObject {
     @Published var lastTiming: String?
     @Published var accessibilityTrusted = false
     @Published var microphoneGranted = false
+    /// Option was down when a menu began opening; the menu shows its developer items until it closes.
+    /// SwiftUI builds the menu bar menu once, so the body can't read the modifier keys itself.
+    @Published var developerMenu = false
+    private var menuObservers: [NSObjectProtocol] = []
     /// Live words in the bubble while holding; off = the bubble shows only where the paste will go.
     @Published var livePreview = UserDefaults.standard.object(forKey: "livePreview") as? Bool ?? true {
         didSet { UserDefaults.standard.set(livePreview, forKey: "livePreview") }
@@ -74,6 +78,16 @@ final class AppModel: ObservableObject {
 
     init() {
         Log.write("launch")
+        let center = NotificationCenter.default
+        menuObservers = [
+            center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                let option = NSEvent.modifierFlags.contains(.option)
+                MainActor.assumeIsolated { if self?.developerMenu != option { self?.developerMenu = option } }
+            },
+            center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { if self?.developerMenu == true { self?.developerMenu = false } }
+            },
+        ]
         Task { await start() }
     }
 
