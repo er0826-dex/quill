@@ -2,9 +2,10 @@ import AVFoundation
 import ObjCGuard
 import FluidAudio
 
-/// Keeps the microphone warm with a short rolling pre-roll in memory, so a press starts with the
-/// audio from just before it (cold starts took 280–720 ms to deliver the first buffer, 10/30).
-/// Dictation never writes to disk; the pre-roll overwrites itself. A meeting can also tee the same
+/// The microphone is open only while it's needed: while the key is held, or while a meeting records
+/// (Eric 11/14: "only while held", so macOS's mic indicator isn't on all day). The cost is the
+/// start: the first buffer arrives 150–700 ms after the press, and `onFirstBuffer` tells the bubble
+/// when Quill is actually listening. Dictation never writes to disk. A meeting can also tee the same
 /// tap into numbered CAF segments (`startFile` / `stopFile`) without disturbing dictation.
 final class Recorder {
     static let sampleRate: Double = 16_000
@@ -37,19 +38,30 @@ final class Recorder {
     /// when it is back (false). The meeting menu shows "recovering microphone" between the two.
     var onRecovery: ((Bool) -> Void)?
 
+    /// Called on the main queue when the first audio of a capture arrives: Quill is listening now.
+    var onFirstBuffer: (() -> Void)?
+    private var awaitingFirstBuffer = false
+
+    /// The mic has a reason to be open: a dictation in progress or a meeting recording.
+    private var needed: Bool {
+        lock.lock(); let c = capturing; lock.unlock()
+        fileLock.lock(); let m = segmentSource != nil; fileLock.unlock()
+        return c || m
+    }
+
     private var restartWork: DispatchWorkItem?
     private var restartAttempt = 0
 
-    /// Opens the mic and keeps it open. Restarts itself when the input device changes.
-    func warmUp() throws {
-        try startEngine()
+    /// Watches for input device changes; the mic itself opens on demand (`start`, `startFile`).
+    func prepare() {
         configObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in
+            guard let self, self.needed else { return }
             Log.write("audio configuration changed; restarting the mic")
-            self?.onRecovery?(true)
-            self?.restartAttempt = 0
-            self?.scheduleRestart(after: 0.3)
+            self.onRecovery?(true)
+            self.restartAttempt = 0
+            self.scheduleRestart(after: 0.3)
         }
     }
 
@@ -58,7 +70,7 @@ final class Recorder {
     private func scheduleRestart(after delay: TimeInterval) {
         restartWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
+            guard let self, self.needed else { return }
             do {
                 try self.startEngine()
                 if self.restartAttempt > 0 { Log.write("mic back after \(self.restartAttempt) retries") }
@@ -94,6 +106,10 @@ final class Recorder {
             for x in chunk { sum += x * x }
             self.lock.lock()
             self.rms = chunk.isEmpty ? 0 : (sum / Float(chunk.count)).squareRoot()
+            if self.capturing, self.awaitingFirstBuffer {
+                self.awaitingFirstBuffer = false
+                DispatchQueue.main.async { self.onFirstBuffer?() }
+            }
             if self.capturing {
                 self.samples.append(contentsOf: chunk)
             } else {
@@ -109,12 +125,29 @@ final class Recorder {
     }
 
     func start() throws {
-        if !engine.isRunning { try startEngine() }
         lock.lock()
-        samples = preRoll
+        samples = preRoll        // non-empty only when a meeting already has the mic open
         preRoll.removeAll()
         capturing = true
+        awaitingFirstBuffer = true
+        rms = 0
         lock.unlock()
+        if !engine.isRunning {
+            do { try startEngine() } catch {
+                lock.lock(); capturing = false; awaitingFirstBuffer = false; lock.unlock()
+                throw error
+            }
+        }
+    }
+
+    /// Closes the mic when nothing needs it any more.
+    private func closeIfIdle() {
+        guard !needed, engine.isRunning else { return }
+        restartWork?.cancel()
+        engine.stop()
+        var guardError: NSError?
+        _ = QuillTryObjC({ self.engine.inputNode.removeTap(onBus: 0) }, &guardError)
+        lock.lock(); preRoll.removeAll(); rms = 0; lock.unlock()
     }
 
     /// The capture so far, at 16 kHz, without stopping it. `lastSeconds` trims to the tail.
@@ -130,14 +163,16 @@ final class Recorder {
         return (try? converter.resample(raw, from: rate)) ?? []
     }
 
-    /// Ends the capture and returns it at 16 kHz mono. The mic stays open.
+    /// Ends the capture and returns it at 16 kHz mono. The mic closes unless a meeting is recording.
     func stop() -> [Float] {
         lock.lock()
         capturing = false
+        awaitingFirstBuffer = false
         let raw = samples
         let rate = inputRate
         samples.removeAll()
         lock.unlock()
+        closeIfIdle()
         return (try? converter.resample(raw, from: rate)) ?? []
     }
 
@@ -163,6 +198,7 @@ final class Recorder {
         segment = nil
         segmentSource = nil
         fileLock.unlock()
+        closeIfIdle()
     }
 
     /// The engine is restarting: close the current segment so the next buffer opens a new one.

@@ -23,7 +23,16 @@ enum QuillState: Equatable {
     var menuBarImage: NSImage {
         let image = NSImage(named: iconName) ?? NSImage(systemSymbolName: "mic", accessibilityDescription: "Quill")!
         image.isTemplate = true
-        return image
+        // Red while listening, like a recording light (Eric 11/14); the template tint everywhere else.
+        guard self == .listening else { return image }
+        let red = NSImage(size: image.size, flipped: false) { rect in
+            image.draw(in: rect)
+            NSColor.systemRed.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+        red.isTemplate = false
+        return red
     }
 
     var label: String {
@@ -128,8 +137,9 @@ final class AppModel: ObservableObject {
         guard !micWarmed else { return }
         micWarmed = true
         bubble.levelSource = { [recorder] in recorder.level }
-        do { try recorder.warmUp(); Log.write("mic warm") }
-        catch { Log.write("mic warm-up failed: \(error)") }
+        recorder.onFirstBuffer = { [weak self] in self?.listening() }
+        recorder.prepare()
+        Log.write("mic ready (opens only while the key is held)")
     }
 
     /// The tap needs Accessibility; poll until it's granted, then install it.
@@ -170,13 +180,19 @@ final class AppModel: ObservableObject {
         do {
             try recorder.start()
             state = .listening
-            bubble.show(target: appName(targetPID))
-            if livePreview { startLiveText() }
-            Log.write("press: recording (start took \(ms(since: pressedAt!)) ms), target \(appName(targetPID))")
+            Log.write("press: opening the mic, target \(appName(targetPID))")
         } catch {
             Log.write("recorder start failed: \(error)")
             state = .failed("microphone: \(error.localizedDescription)")
         }
+    }
+
+    /// The first audio has arrived: show the bubble now, so it means "speak".
+    private func listening() {
+        guard state == .listening, let pressedAt else { return }
+        bubble.show(target: appName(targetPID))
+        if livePreview { startLiveText() }
+        Log.write("listening \(ms(since: pressedAt)) ms after the press")
     }
 
     private func cancel() {
