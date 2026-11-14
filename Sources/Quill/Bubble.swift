@@ -324,15 +324,16 @@ private struct BubbleView: View {
                 lineWidth: 0.5)
         )
         .overlay(
-            Capsule().strokeBorder(Self.glowColor.opacity(0.15 + 0.6 * model.glow), lineWidth: 0.5 + 0.7 * model.glow)
+            Capsule().strokeBorder(Self.glowColor.opacity(0.35 + 0.65 * model.glow), lineWidth: 0.8 + 1.0 * model.glow)
         )
         .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
         // A soft warm glow that follows the voice, so the bubble is easy to find while talking.
-        .shadow(color: Self.glowColor.opacity(0.1 + 0.55 * model.glow), radius: 3 + 9 * model.glow)
+        .shadow(color: Self.glowColor.opacity(0.35 + 0.65 * model.glow), radius: 2 + 4 * model.glow)
+        .shadow(color: Self.glowColor.opacity(0.2 + 0.6 * model.glow), radius: 6 + 14 * model.glow)
         .padding(Self.glowRoom)   // room inside the panel so the glow isn't clipped
     }
 
-    static let glowRoom: CGFloat = 16
+    static let glowRoom: CGFloat = 24
     static let glowColor = Color(red: 1.0, green: 0.88, blue: 0.62)   // warm white, a hint of candle
 
     /// The tape: soft grey words entering at the right edge and fading out at the left.

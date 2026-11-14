@@ -20,12 +20,12 @@ final class Recorder {
     private var configObserver: NSObjectProtocol?
     private var rms: Float = 0
 
-    /// How loud the mic is right now, 0…1 (about -50 dB to -15 dB), for the bubble's glow.
+    /// How loud the mic is right now, 0…1 (about -55 dB to -20 dB), for the bubble's glow.
     var level: Float {
         lock.lock(); let r = rms; lock.unlock()
         guard r > 0 else { return 0 }
         let db = 20 * log10(r)
-        return min(1, max(0, (db + 50) / 35))
+        return min(1, max(0, (db + 55) / 35))   // -55 dB to -20 dB: ordinary speech reaches the top
     }
     // Meeting file: written from the tap thread, guarded by its own lock so dictation is never held up.
     private let fileLock = NSLock()
