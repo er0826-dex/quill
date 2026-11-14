@@ -13,6 +13,11 @@ struct QuillApp: App {
         }
         .menuBarExtraStyle(.menu)
 
+        Window("Welcome to Quill", id: "welcome") {
+            OnboardingView(model: model)
+        }
+        .windowResizability(.contentSize)
+
         Window("Quill Settings", id: "settings") {
             SettingsView(model: model)
         }
@@ -24,9 +29,11 @@ struct QuillApp: App {
 struct MenuBarIcon: View {
     @ObservedObject var model: AppModel
     @ObservedObject var meetings: Meetings
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Image(nsImage: image)
+            .onAppear { FirstLaunch.openIfNeeded { openWindow(id: "welcome") } }
     }
 
     private var image: NSImage {
@@ -99,6 +106,10 @@ struct MenuContent: View {
             Button("Grant Microphone…") { Permissions.openMicrophoneSettings() }
         }
         Text("Hold \(model.hotkeyKey.name) to talk")
+        Button("Welcome to Quill…") {
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "welcome")
+        }
         Button("Settings…") {
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "settings")
