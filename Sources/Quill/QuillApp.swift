@@ -52,6 +52,7 @@ struct MenuBarIcon: View {
 /// The meeting section of the menu.
 struct MeetingMenu: View {
     @ObservedObject var meetings: Meetings
+    var developer = false
 
     var body: some View {
         switch meetings.phase {
@@ -73,7 +74,9 @@ struct MeetingMenu: View {
         if meetings.lastTranscript != nil {
             Button("Open Last Transcript") { meetings.openLastTranscript() }
         }
-        Button("Open Meetings Folder") { meetings.openFolder() }
+        if developer || meetings.lastFolder != nil {
+            Button("Open Meetings Folder") { meetings.openFolder() }
+        }
     }
 }
 
@@ -81,35 +84,46 @@ struct MenuContent: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
 
+    /// Option held while opening the menu shows the developer items (timings, log, re-transcribe…).
+    private var developer: Bool { NSEvent.modifierFlags.contains(.option) }
+
     var body: some View {
-        Text(model.state.label)
-        if let timing = model.lastTiming {
+        // Only say something when there's something to say; "Ready" is the quiet default.
+        if model.state != .idle || developer {
+            Text(model.state.label)
+        }
+        if developer, let timing = model.lastTiming {
             Text(timing)
         }
-        Divider()
-        Button("Paste Last Transcript") { model.pasteLast() }
-            .disabled(model.lastText == nil)
-        Button("Copy Last Transcript") { model.copyLast() }
-            .disabled(model.lastText == nil)
-        Button("Re-transcribe Last Recording") { model.retranscribeLast() }
-            .disabled(model.lastAudio == nil)
-        if let text = model.lastText {
-            Text(text.count > 60 ? String(text.prefix(60)) + "…" : text)
-        }
-        Toggle("Live Preview While Talking", isOn: $model.livePreview)
-        Divider()
-        MeetingMenu(meetings: model.meetings)
-        Divider()
         if !model.accessibilityTrusted {
             Button("Grant Accessibility…") { Permissions.openAccessibilitySettings() }
         }
         if !model.microphoneGranted {
             Button("Grant Microphone…") { Permissions.openMicrophoneSettings() }
         }
-        Text("Hold \(model.hotkeyKey.name) to talk")
-        Button("Welcome to Quill…") {
-            NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: "welcome")
+        if model.lastText != nil {
+            Button("Paste Last Transcript") { model.pasteLast() }
+            Button("Copy Last Transcript") { model.copyLast() }
+        }
+        if developer {
+            Button("Re-transcribe Last Recording") { model.retranscribeLast() }
+                .disabled(model.lastAudio == nil)
+            if let text = model.lastText {
+                Text(text.count > 60 ? String(text.prefix(60)) + "…" : text)
+            }
+        }
+        Divider()
+        MeetingMenu(meetings: model.meetings, developer: developer)
+        Divider()
+        if developer {
+            Text("Hold \(model.hotkeyKey.name) to talk")
+            Toggle("Live Preview While Talking", isOn: $model.livePreview)
+            Button("Welcome to Quill…") {
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "welcome")
+            }
+            Button("Open Log") { NSWorkspace.shared.open(Log.url) }
+            Divider()
         }
         Button("Settings…") {
             NSApp.activate(ignoringOtherApps: true)
@@ -117,7 +131,6 @@ struct MenuContent: View {
         }
         .keyboardShortcut(",")
         Button("About Quill") { About.show() }
-        Button("Open Log") { NSWorkspace.shared.open(Log.url) }
         Button("Quit Quill") {
             if model.meetings.isRecording { model.meetings.stop() }   // never lose a meeting to Quit
             NSApp.terminate(nil)

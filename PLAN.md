@@ -2,7 +2,7 @@
 
 Eric, 11/14: publish it, free, keep the name; set it apart from humanitas-labs/quill (a meeting recorder, no dictation, build-from-source) by what it does that theirs doesn't. "Let's do all the changes needed… get a page up on Millwright."
 
-Tagline: **Hold a key, talk, and your words appear where you're typing. Free and local. Records meetings too.**
+Tagline: **Hold a key, talk. It writes. Free and local. Records meetings too.**
 
 ## Workstreams (parallel agents, each on its own branch and files)
 
