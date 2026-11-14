@@ -79,13 +79,15 @@ final class AppModel: ObservableObject {
 
     private func start() async {
         LoginItem.followMove()
-        microphoneGranted = await Permissions.requestMicrophone()
-        if microphoneGranted {
-            bubble.levelSource = { [recorder] in recorder.level }
-            do { try recorder.warmUp(); Log.write("mic warm") }
-            catch { Log.write("mic warm-up failed: \(error)") }
+        // On a first run the welcome window asks for each permission, with its reason; later runs ask here.
+        let firstRun = !UserDefaults.standard.bool(forKey: "onboardingDone")
+        if firstRun {
+            microphoneGranted = Permissions.microphoneGranted()
+            if microphoneGranted { warmMicrophone() }
+        } else {
+            await requestMicrophone()
         }
-        accessibilityTrusted = Permissions.accessibility(prompt: true)
+        accessibilityTrusted = Permissions.accessibility(prompt: !firstRun)
         startHotkeyWhenTrusted()
 
         state = .loading("speech model (first run downloads it)")
@@ -98,6 +100,22 @@ final class AppModel: ObservableObject {
             Log.write("model load failed: \(error)")
             state = .failed("model: \(error.localizedDescription)")
         }
+    }
+
+    /// Asks for the microphone if undecided, then opens the warm mic (once).
+    func requestMicrophone() async {
+        microphoneGranted = await Permissions.requestMicrophone()
+        if microphoneGranted { warmMicrophone() }
+    }
+
+    private var micWarmed = false
+
+    private func warmMicrophone() {
+        guard !micWarmed else { return }
+        micWarmed = true
+        bubble.levelSource = { [recorder] in recorder.level }
+        do { try recorder.warmUp(); Log.write("mic warm") }
+        catch { Log.write("mic warm-up failed: \(error)") }
     }
 
     /// The tap needs Accessibility; poll until it's granted, then install it.

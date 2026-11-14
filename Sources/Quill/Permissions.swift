@@ -16,6 +16,8 @@ enum Permissions {
         }
     }
 
+    static var microphoneStatus: AVAuthorizationStatus { AVCaptureDevice.authorizationStatus(for: .audio) }
+
     static func microphoneGranted() -> Bool {
         AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     }
