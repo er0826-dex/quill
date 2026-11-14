@@ -11,7 +11,7 @@ What's different from other dictation apps I've used:
 - Live words at the cursor, not only after you release.
 - It never pastes into the wrong app. If focus moved, it holds the text and you choose Paste Last Transcript or Copy Last Transcript from the menu. No history is kept, by design; only the last dictation, in memory.
 - Local and free. Transcription is on-device (Parakeet TDT v2, about 0.5 GB, downloaded once). No account, no telemetry.
-- Meetings too. Start and Stop from the menu records your mic and system audio as separate tracks (crash-safe CAF files, survives AirPods connecting mid-call), then transcribes with Whisper Large v3 Turbo into a transcript with Me/Them.
+- Meetings too. Start and Stop from the menu records your mic and system audio as separate tracks (crash-safe CAF files, survives AirPods connecting mid-call), then transcribes on-device (Parakeet by default, Whisper Large v3 Turbo optional) into a transcript with Me/Them.
 
 Honest limits: English only, Apple Silicon only, macOS 15 or later, and it's new. The first meeting transcription needs a ~1.5 GB model and a one-time 10-15 minute Neural Engine compile.
 

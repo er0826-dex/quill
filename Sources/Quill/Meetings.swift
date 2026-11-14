@@ -73,7 +73,13 @@ final class Meetings: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Meeting saved (\(Self.clock(duration)))"
-        var info = "Desktop › Quill Meetings › \(folder.lastPathComponent)\n\nTranscribe it now with Whisper Large v3 Turbo? About a minute per ten minutes of audio. The very first time, setting up the model takes 10–15 minutes more."
+        var info = "Desktop › Quill Meetings › \(folder.lastPathComponent)\n\n"
+        switch MeetingEngine.saved {
+        case .parakeet:
+            info += "Transcribe it now? With Parakeet, an hour of audio takes about a minute."
+        case .whisper:
+            info += "Transcribe it now with Whisper Large v3 Turbo? About a minute per ten minutes of audio. The very first time, it downloads 1.5 GB and takes 10–15 minutes more to set up."
+        }
         if systemSilent {
             info += "\n\nThe Mac's audio track is silent. Fine for an in-person meeting; if this was a call, allow Quill in System Settings › Privacy & Security › Screen & System Audio Recording."
         }

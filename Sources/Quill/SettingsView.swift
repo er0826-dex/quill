@@ -3,6 +3,7 @@ import SwiftUI
 
 /// The Settings window: hotkey, live preview, launch at login, engine, permissions.
 struct SettingsView: View {
+    @State private var meetingEngine = MeetingEngine.saved
     @ObservedObject var model: AppModel
     @State private var loginStatus = SMAppService.mainApp.status
     @State private var loginError: String?
@@ -31,8 +32,14 @@ struct SettingsView: View {
                     Text(loginError).font(.caption).foregroundStyle(.red)
                 }
             }
-            Section("Engine") {
-                Text("Parakeet TDT v2 (English) via FluidAudio 0.18.0")
+            Section("Speech") {
+                LabeledContent("Dictation", value: "Parakeet TDT v2 (English)")
+                Picker("Meetings", selection: $meetingEngine) {
+                    ForEach(MeetingEngine.allCases) { Text($0.name).tag($0) }
+                }
+                .onChange(of: meetingEngine) { _, engine in
+                    UserDefaults.standard.set(engine.rawValue, forKey: "meetingEngine")
+                }
             }
             Section("Permissions") {
                 permissionRow("Microphone", granted: model.microphoneGranted, open: Permissions.openMicrophoneSettings)

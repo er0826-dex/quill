@@ -38,7 +38,7 @@ Choose **Start Meeting Recording** from the menu and **Stop** when you're done. 
 
 Each meeting is saved in `~/Desktop/Quill Meetings/<date time>/`. Recording is crash-safe: audio goes to `.caf` files (`mic.caf`, `system.caf`, plus numbered segments if a track restarts) that stay readable even if Quill quits mid-meeting, and a device change such as AirPods connecting does not end the recording.
 
-After you stop, Quill offers to transcribe with Whisper Large v3 Turbo. The model is about 1.5 GB, downloaded once, followed by a one-time 10-15 minute Neural Engine compile on first use. The result is `transcript.md`, timestamped, with your words labeled **Me** and everyone else **Them**.
+After you stop, Quill offers to transcribe. By default it uses Parakeet, the model dictation already has, so an hour of audio takes about a minute. Settings → Meetings switches to Whisper Large v3 Turbo instead (about 1.5 GB, downloaded once, plus a one-time 10–15 minute Neural Engine compile on first use). The result is `transcript.md`, timestamped, with your words labeled **Me** and everyone else **Them**.
 
 ## Privacy
 

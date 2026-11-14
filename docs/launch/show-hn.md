@@ -10,7 +10,7 @@ Quill is a macOS menu-bar app. You hold Right Option, talk, and let go; the text
 
 Two things I cared about. First, it should never paste into the wrong app: if focus moves before the text lands, Quill holds it and you paste or copy it from the menu. It keeps the last dictation in memory for that reason and keeps no history on purpose. Second, the words should appear while you speak, not after.
 
-It also records meetings: your mic and the system audio as separate tracks, saved as CAF files so a crash mid-meeting doesn't lose the recording, then transcribed with Whisper Large v3 Turbo into a timestamped transcript with Me/Them. Recording keeps going through a device change like AirPods connecting. Meeting transcription needs a ~1.5 GB model and a one-time 10-15 minute Neural Engine compile.
+It also records meetings: your mic and the system audio as separate tracks, saved as CAF files so a crash mid-meeting doesn't lose the recording, then transcribed on-device into a timestamped transcript with Me/Them: Parakeet by default (an hour in about a minute), Whisper Large v3 Turbo if you prefer it. Recording keeps going through a device change like AirPods connecting.
 
 Limits: English only, Apple Silicon only, macOS 15 or later. It's new, so expect rough edges. The system-audio capture code is adapted from humanitas-labs/quill (MIT), a different project that records meetings but doesn't do dictation.
 

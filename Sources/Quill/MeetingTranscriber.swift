@@ -1,10 +1,30 @@
 import AVFoundation
+import FluidAudio
 import Foundation
 import WhisperKit
 
-/// Whisper Large v3 Turbo (full size) through WhisperKit, for meeting recordings. Dictation stays on
-/// Parakeet (Transcriber). The model is downloaded on first use, loaded when a transcription starts
-/// and released when it ends, so the ~1.5 GB of weights never sit in memory between meetings.
+/// The engine a meeting is transcribed with (Settings). Parakeet is the default (Eric 11/14): it's the
+/// model dictation already downloaded, so a first meeting transcribes in seconds; Whisper Large v3
+/// Turbo is the option, at 1.5 GB and a one-time Neural Engine compile of 10–15 minutes.
+enum MeetingEngine: String, CaseIterable, Identifiable {
+    case parakeet, whisper
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .parakeet: "Parakeet TDT v2 (fast, English)"
+        case .whisper: "Whisper Large v3 Turbo (1.5 GB download)"
+        }
+    }
+
+    static var saved: MeetingEngine {
+        UserDefaults.standard.string(forKey: "meetingEngine").flatMap(MeetingEngine.init(rawValue:)) ?? .parakeet
+    }
+}
+
+/// Transcribes meeting recordings with the chosen engine. Its model is loaded when a transcription
+/// starts and released when it ends; Parakeet gets its own AsrManager so dictation never waits on a meeting.
 actor MeetingTranscriber {
     /// The WhisperKit variant; its folder in argmaxinc/whisperkit-coreml is `openai_whisper-` + this.
     static let modelName = "large-v3-v20240930_turbo"
@@ -34,25 +54,37 @@ actor MeetingTranscriber {
     /// Transcribes every `mic*.caf` as "Me" and `system*.caf` as "Them" (the old `mic.m4a` and
     /// `system.m4a` too; any may be missing), each at its offset from `meta.json`, merges all by start
     /// time into `transcript.md` beside them, and returns its URL.
-    func transcribe(folder: URL, progress: @escaping @Sendable (String) -> Void) async throws -> URL {
+    func transcribe(folder: URL, engine: MeetingEngine = .saved,
+                    progress: @escaping @Sendable (String) -> Void) async throws -> URL {
         let tracks = Self.segments(in: folder)
         guard !tracks.isEmpty else { throw MeetingError.noAudio }
 
         let started = Date()
-        let kit = try await loadModel(progress: progress)
-        Log.write("meeting: model ready in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
+        var kit: WhisperKit?
+        var asr: AsrManager?
+        switch engine {
+        case .whisper: kit = try await loadModel(progress: progress)
+        case .parakeet:
+            progress("Loading Parakeet…")
+            let manager = AsrManager(config: .default)
+            try await manager.loadModels(try await AsrModels.downloadAndLoad(version: .v2))
+            asr = manager
+        }
+        Log.write("meeting: \(engine.rawValue) ready in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
 
         var lines: [Line] = []
         for (n, track) in tracks.enumerated() {
             progress("Transcribing \(track.speaker)\(tracks.count > 2 ? " (\(n + 1) of \(tracks.count))" : "")…")
             do {
-                lines += try await transcribe(track, with: kit)
+                if let kit { lines += try await transcribe(track, with: kit) }
+                if let asr { lines += try await transcribe(track, with: asr) }
             } catch {
                 // A segment cut off by a crash or a failed restart shouldn't sink the rest.
                 Log.write("meeting: \(track.url.lastPathComponent) skipped: \(error.localizedDescription)")
             }
         }
-        await kit.unloadModels()
+        await kit?.unloadModels()
+        asr = nil
 
         progress("Writing transcript…")
         let transcript = folder.appendingPathComponent("transcript.md")
@@ -120,6 +152,50 @@ actor MeetingTranscriber {
             guard start < Float(samples.count) / 16_000, text.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
             return Line(start: start + offset, end: end + offset, speaker: speaker, text: text)
         }
+    }
+
+    /// Parakeet on one segment: its token timings become lines, split at a pause of 0.8 s or more,
+    /// or at a sentence end once a line runs past 12 s.
+    private func transcribe(_ segment: Segment, with asr: AsrManager) async throws -> [Line] {
+        let url = segment.url, speaker = segment.speaker, offset = segment.offset
+        let samples = try AudioProcessor.loadAudioAsFloatArray(fromPath: url.path)
+        let rms = (samples.reduce(0) { $0 + $1 * $1 } / Float(max(samples.count, 1))).squareRoot()
+        guard rms >= Self.silenceRMS, samples.count >= 16_000 else {
+            Log.write("meeting: \(url.lastPathComponent) is silent or too short; skipped")
+            return []
+        }
+        let t0 = Date()
+        var state = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
+        let result = try await asr.transcribe(samples, decoderState: &state)
+        Log.write("meeting: \(url.lastPathComponent) \(samples.count / 16_000) s of audio in \(String(format: "%.1f", Date().timeIntervalSince(t0))) s")
+        guard let tokens = result.tokenTimings, !tokens.isEmpty else {
+            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? [] : [Line(start: offset, end: offset + Float(result.duration), speaker: speaker, text: text)]
+        }
+        var lines: [Line] = []
+        var text = "", start: Float = 0, end: Float = 0
+        func flush() {
+            let clean = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
+            if clean.contains(where: { $0.isLetter || $0.isNumber }) {
+                lines.append(Line(start: start + offset, end: end + offset, speaker: speaker, text: clean))
+            }
+            text = ""
+        }
+        for token in tokens {
+            let piece = token.token.replacingOccurrences(of: "\u{2581}", with: " ")
+            let tStart = Float(token.startTime), tEnd = Float(token.endTime)
+            // Punctuation can be timed after a pause; it belongs to the sentence before it.
+            let punctuation = !piece.contains(where: { $0.isLetter || $0.isNumber })
+            let pause = !text.isEmpty && !punctuation && tStart - end >= 0.8   // `end`: the last word, not its late full stop
+            let longSentence = !text.isEmpty && end - start > 12 && text.last.map { ".?!".contains($0) } == true
+            if pause || longSentence { flush() }
+            if text.isEmpty { start = tStart }
+            text += piece
+            if !punctuation { end = tEnd }
+        }
+        flush()
+        return lines
     }
 
     /// Strips Whisper's special tokens and bracketed non-speech ([BLANK_AUDIO], [Music]).
