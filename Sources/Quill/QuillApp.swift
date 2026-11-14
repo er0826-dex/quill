@@ -57,6 +57,7 @@ struct MeetingMenu: View {
         switch meetings.phase {
         case .recording(let since):
             Text("Recording meeting · \(Text(since, style: .timer))")
+            if let note = meetings.statusText { Text(note) }
             Button("Stop Meeting Recording") { meetings.stop() }
         case .transcribing(let progress):
             Text(progress)
