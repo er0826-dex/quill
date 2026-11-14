@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import UserNotifications
 
 /// Meeting mode from the menu: record the mic and the Mac's audio as two tracks, then offer to
 /// transcribe them with Whisper Large v3 Turbo. Dictation keeps working during a meeting.
@@ -15,12 +16,28 @@ final class Meetings: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var lastFolder: URL?
     @Published private(set) var lastTranscript: URL?
+    /// How the recording is going; `statusText` is the line for the menu.
+    @Published private(set) var status: MeetingStatus = .ok
 
     private let recorder: MeetingRecorder
     private let transcriber = MeetingTranscriber()
 
     init(recorder: Recorder) {
         self.recorder = MeetingRecorder(recorder: recorder)
+        self.recorder.onStatus = { [weak self] in self?.status = $0 }
+        self.recorder.onLost = { [weak self] in self?.notifyLost($0) }
+    }
+
+    /// The menu line while recording, or nil when everything is fine.
+    var statusText: String? {
+        guard isRecording else { return nil }
+        switch status {
+        case .ok: return nil
+        case .recoveringMic: return "Recovering microphone…"
+        case .recoveringSystem: return "Recovering system audio…"
+        case .systemLost: return "System audio lost: the mic is still recording"
+        case .systemSilent: return "System audio is silent"
+        }
     }
 
     var isRecording: Bool { if case .recording = phase { true } else { false } }
@@ -33,6 +50,7 @@ final class Meetings: ObservableObject {
             lastTranscript = nil
             phase = .recording(since: Date())
             Log.write("meeting recording started")
+            Self.askToNotify()
         } catch {
             Log.write("meeting start failed: \(error)")
             phase = .failed("couldn't start: \(error.localizedDescription)")
@@ -42,7 +60,9 @@ final class Meetings: ObservableObject {
     func stop() {
         guard let (folder, duration) = recorder.stop() else { return }
         phase = .idle
-        let silent = Self.isSilent(folder.appendingPathComponent("system.m4a"))
+        status = .ok
+        let systemTracks = MeetingFiles.segments(in: folder).filter { $0.track == "system" }.map(\.url)
+        let silent = systemTracks.allSatisfy(Self.isSilent)
         Log.write("meeting recording stopped after \(Int(duration)) s, system audio \(silent ? "silent" : "present")")
         offerTranscription(folder: folder, duration: duration, systemSilent: silent)
     }
@@ -105,6 +125,26 @@ final class Meetings: ObservableObject {
         let folder = lastFolder ?? MeetingRecorder.baseFolder
         NSWorkspace.shared.open(FileManager.default.fileExists(atPath: folder.path) ? folder
                                 : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop"))
+    }
+
+    // MARK: Notifications
+
+    /// Asks once, at the first meeting, so a lost track can post a banner. Only an installed app can;
+    /// a bare binary has no bundle and gets the sound and the log line instead.
+    private static func askToNotify() {
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
+    }
+
+    /// A track was lost for good: a sound, a banner if allowed, and the menu line stays.
+    private func notifyLost(_ track: String) {
+        Log.write("meeting: \(track) lost; notifying")
+        NSSound(named: "Basso")?.play()
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Quill lost the \(track)"
+        content.body = "The meeting is still recording the microphone. What was captured is saved."
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "quill.track-lost", content: content, trigger: nil))
     }
 
     // MARK: Helpers

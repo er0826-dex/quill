@@ -9,7 +9,7 @@ actor MeetingTranscriber {
     /// The WhisperKit variant; its folder in argmaxinc/whisperkit-coreml is `openai_whisper-` + this.
     static let modelName = "large-v3-v20240930_turbo"
 
-    /// Below this RMS a whole track is treated as silence (an empty `system.m4a` from an in-person meeting).
+    /// Below this RMS a whole track is treated as silence (an empty system track from an in-person meeting).
     private static let silenceRMS: Float = 0.002
 
     private static let modelsFolder = FileManager.default.homeDirectoryForCurrentUser
@@ -24,12 +24,18 @@ actor MeetingTranscriber {
         var text: String
     }
 
-    /// Transcribes `mic.m4a` as "Me" and `system.m4a` as "Them" (either may be missing), merges both by
-    /// start time into `transcript.md` beside them, and returns its URL.
+    /// One audio file placed on the meeting clock: `offset` seconds after the start.
+    private struct Segment {
+        var url: URL
+        var speaker: String
+        var offset: Float
+    }
+
+    /// Transcribes every `mic*.caf` as "Me" and `system*.caf` as "Them" (the old `mic.m4a` and
+    /// `system.m4a` too; any may be missing), each at its offset from `meta.json`, merges all by start
+    /// time into `transcript.md` beside them, and returns its URL.
     func transcribe(folder: URL, progress: @escaping @Sendable (String) -> Void) async throws -> URL {
-        let tracks = [("mic.m4a", "Me"), ("system.m4a", "Them")]
-            .map { (folder.appendingPathComponent($0.0), $0.1) }
-            .filter { FileManager.default.fileExists(atPath: $0.0.path) }
+        let tracks = Self.segments(in: folder)
         guard !tracks.isEmpty else { throw MeetingError.noAudio }
 
         let started = Date()
@@ -37,14 +43,14 @@ actor MeetingTranscriber {
         Log.write("meeting: model ready in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
 
         var lines: [Line] = []
-        do {
-            for (url, speaker) in tracks {
-                progress("Transcribing \(speaker)…")
-                lines += try await transcribe(url, as: speaker, with: kit)
+        for (n, track) in tracks.enumerated() {
+            progress("Transcribing \(track.speaker)\(tracks.count > 2 ? " (\(n + 1) of \(tracks.count))" : "")…")
+            do {
+                lines += try await transcribe(track, with: kit)
+            } catch {
+                // A segment cut off by a crash or a failed restart shouldn't sink the rest.
+                Log.write("meeting: \(track.url.lastPathComponent) skipped: \(error.localizedDescription)")
             }
-        } catch {
-            await kit.unloadModels()
-            throw error
         }
         await kit.unloadModels()
 
@@ -70,7 +76,27 @@ actor MeetingTranscriber {
         return try await WhisperKit(config)
     }
 
-    private func transcribe(_ url: URL, as speaker: String, with kit: WhisperKit) async throws -> [Line] {
+    /// The folder's segments with their offsets: from `meta.json`, else from when each file was created
+    /// (a folder from a crash before the first write), else 0 (the old two-file layout).
+    private static func segments(in folder: URL) -> [Segment] {
+        let meta = MeetingFiles.meta(in: folder)
+        let files = MeetingFiles.segments(in: folder)
+        func created(_ url: URL) -> Date? { try? url.resourceValues(forKeys: [.creationDateKey]).creationDate }
+        let first = files.compactMap { created($0.url) }.min()
+        return files.map { file in
+            let name = file.url.lastPathComponent
+            var offset = 0.0
+            if let entry = meta?.segments.first(where: { $0.file == name }) {
+                offset = entry.offset
+            } else if name.hasSuffix(".caf"), let first, let date = created(file.url) {
+                offset = date.timeIntervalSince(first)
+            }
+            return Segment(url: file.url, speaker: file.track == "mic" ? "Me" : "Them", offset: Float(offset))
+        }
+    }
+
+    private func transcribe(_ segment: Segment, with kit: WhisperKit) async throws -> [Line] {
+        let url = segment.url, speaker = segment.speaker, offset = segment.offset
         let samples = try AudioProcessor.loadAudioAsFloatArray(fromPath: url.path)
         let rms = (samples.reduce(0) { $0 + $1 * $1 } / Float(max(samples.count, 1))).squareRoot()
         guard rms >= Self.silenceRMS else {
@@ -90,7 +116,9 @@ actor MeetingTranscriber {
             let end = seg.words?.last?.end ?? seg.end
             // Whisper's stock hallucinations on near-silence: a lone "you" or "thank you" under a second long.
             if end - start < 1, Self.fillers.contains(text.lowercased().trimmingCharacters(in: .punctuationCharacters)) { return nil }
-            return text.isEmpty ? nil : Line(start: start, end: end, speaker: speaker, text: text)
+            // A timestamp past the end of the audio, or no word at all ("-"), is Whisper filling silence.
+            guard start < Float(samples.count) / 16_000, text.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
+            return Line(start: start + offset, end: end + offset, speaker: speaker, text: text)
         }
     }
 
@@ -126,5 +154,5 @@ actor MeetingTranscriber {
 
 enum MeetingError: LocalizedError {
     case noAudio
-    var errorDescription: String? { "the meeting folder has no mic.m4a or system.m4a" }
+    var errorDescription: String? { "the meeting folder has no recorded audio (mic or system)" }
 }

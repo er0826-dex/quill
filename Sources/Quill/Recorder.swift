@@ -5,7 +5,7 @@ import FluidAudio
 /// Keeps the microphone warm with a short rolling pre-roll in memory, so a press starts with the
 /// audio from just before it (cold starts took 280–720 ms to deliver the first buffer, 10/30).
 /// Dictation never writes to disk; the pre-roll overwrites itself. A meeting can also tee the same
-/// tap into an .m4a (`startFile` / `stopFile`) without disturbing dictation.
+/// tap into numbered CAF segments (`startFile` / `stopFile`) without disturbing dictation.
 final class Recorder {
     static let sampleRate: Double = 16_000
     private static let preRollSeconds: Double = 0.5
@@ -29,10 +29,13 @@ final class Recorder {
     }
     // Meeting file: written from the tap thread, guarded by its own lock so dictation is never held up.
     private let fileLock = NSLock()
-    private var file: AVAudioFile?
-    private var fileConverter: AVAudioConverter?
-    private var fileFormat: AVAudioFormat?
-    private var fileFailed = false
+    private var segmentSource: (() -> URL)?     // non-nil while a meeting is recording
+    private var segment: SegmentWriter?         // nil until the next buffer opens one
+    private var segmentFailed = false
+
+    /// Called on the main queue when the engine starts restarting after a device change (true) and
+    /// when it is back (false). The meeting menu shows "recovering microphone" between the two.
+    var onRecovery: ((Bool) -> Void)?
 
     private var restartWork: DispatchWorkItem?
     private var restartAttempt = 0
@@ -44,6 +47,7 @@ final class Recorder {
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in
             Log.write("audio configuration changed; restarting the mic")
+            self?.onRecovery?(true)
             self?.restartAttempt = 0
             self?.scheduleRestart(after: 0.3)
         }
@@ -59,6 +63,7 @@ final class Recorder {
                 try self.startEngine()
                 if self.restartAttempt > 0 { Log.write("mic back after \(self.restartAttempt) retries") }
                 self.restartAttempt = 0
+                self.onRecovery?(false)
             } catch {
                 self.restartAttempt += 1
                 Log.write("mic restart failed (try \(self.restartAttempt)): \(error.localizedDescription)")
@@ -78,7 +83,7 @@ final class Recorder {
         // Mid-change the input can report no channels or no rate; installing a tap then throws.
         guard format.sampleRate > 0, format.channelCount > 0 else { throw RecorderError.noInput }
         lock.lock(); inputRate = format.sampleRate; preRoll.removeAll(); lock.unlock()
-        updateFileConverter(for: format)
+        rollSegment()
         guardError = nil
         let installed = QuillTryObjC({ input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self else { return }
@@ -138,70 +143,52 @@ final class Recorder {
 
     // MARK: Meeting file
 
-    /// Starts writing the mic to an AAC .m4a (mono, at the input's sample rate) from the running tap.
-    func startFile(url: URL) throws {
-        if !engine.isRunning { try startEngine() }
-        let input = engine.inputNode.outputFormat(forBus: 0)
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: input.sampleRate,
-            AVNumberOfChannelsKey: 1,
-        ]
-        let newFile = try AVAudioFile(forWriting: url, settings: settings)
+    /// Starts writing the mic to numbered CAF segments (`nextURL` names each one) from the running tap.
+    /// A segment opens on the first buffer that arrives, converting whatever the input is to 16 kHz
+    /// mono. Each engine restart (a device change, a gap in the audio) closes it, and the next
+    /// buffer opens the next segment, so each file's start is its true place on the meeting clock.
+    func startFile(nextURL: @escaping () -> URL) throws {
         fileLock.lock()
-        file = newFile
-        fileFormat = newFile.processingFormat
-        fileFailed = false
+        segmentSource = nextURL
+        segment = nil
+        segmentFailed = false
         fileLock.unlock()
-        updateFileConverter(for: input)
+        if !engine.isRunning { try startEngine() }
     }
 
     /// Stops writing and closes the file. Dictation is untouched.
     func stopFile() {
         fileLock.lock()
-        file = nil
-        fileConverter = nil
-        fileFormat = nil
+        segment?.close()
+        segment = nil
+        segmentSource = nil
         fileLock.unlock()
     }
 
-    /// Converts the input to the file's format (mono float at the file's rate). After a device change
-    /// the new input may differ; the file keeps the format it was opened with.
-    private func updateFileConverter(for input: AVAudioFormat) {
-        fileLock.lock(); defer { fileLock.unlock() }
-        guard file != nil, let target = fileFormat else { return }
-        if input == target {
-            fileConverter = nil
-        } else {
-            fileConverter = AVAudioConverter(from: input, to: target)
-            Log.write("mic file: input is now \(Int(input.sampleRate)) Hz x\(input.channelCount); converting")
-        }
+    /// The engine is restarting: close the current segment so the next buffer opens a new one.
+    private func rollSegment() {
+        fileLock.lock()
+        if segment != nil { Log.write("mic file: engine restarted; next segment") }
+        segment?.close()
+        segment = nil
+        segmentFailed = false
+        fileLock.unlock()
     }
 
     private func writeToFile(_ buffer: AVAudioPCMBuffer) {
         fileLock.lock(); defer { fileLock.unlock() }
-        guard let file, !fileFailed else { return }
-        do {
-            if let converter = fileConverter, let target = fileFormat {
-                let ratio = target.sampleRate / buffer.format.sampleRate
-                let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
-                guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
-                var supplied = false
-                var error: NSError?
-                converter.convert(to: out, error: &error) { _, status in
-                    if supplied { status.pointee = .noDataNow; return nil }
-                    supplied = true
-                    status.pointee = .haveData
-                    return buffer
-                }
-                if let error { throw error }
-                try file.write(from: out)
-            } else {
-                try file.write(from: buffer)
+        guard let source = segmentSource, !segmentFailed else { return }
+        if segment == nil {
+            do { segment = try SegmentWriter(url: source()) }
+            catch {
+                segmentFailed = true
+                Log.write("mic file couldn't open: \(error.localizedDescription)")
+                return
             }
-        } catch {
-            fileFailed = true
-            Log.write("mic file write failed, file stops here: \(error.localizedDescription)")
+        }
+        if let problem = segment?.write(buffer) {
+            segmentFailed = true
+            Log.write("mic file write failed, segment stops here: \(problem)")
         }
     }
 }
