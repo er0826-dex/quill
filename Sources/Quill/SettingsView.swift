@@ -4,6 +4,7 @@ import SwiftUI
 /// The Settings window: hotkey, live preview, launch at login, engine, permissions.
 struct SettingsView: View {
     @State private var meetingEngine = MeetingEngine.saved
+    @State private var micWarmSeconds = Recorder.keepWarmSeconds
     @ObservedObject var model: AppModel
     @State private var loginStatus = SMAppService.mainApp.status
     @State private var loginError: String?
@@ -21,6 +22,18 @@ struct SettingsView: View {
             }
             Section("Dictation") {
                 Toggle("Live preview while talking", isOn: $model.livePreview)
+                Picker("Keep the mic ready after dictating", selection: $micWarmSeconds) {
+                    Text("Off").tag(0.0)
+                    Text("30 seconds").tag(30.0)
+                    Text("1 minute").tag(60.0)
+                    Text("5 minutes").tag(300.0)
+                }
+                .onChange(of: micWarmSeconds) { _, seconds in
+                    UserDefaults.standard.set(seconds, forKey: "micWarmSeconds")
+                }
+                Text("While ready, the next dictation starts instantly and macOS shows its mic indicator. Quill keeps only the last half second in memory and transcribes nothing until you hold the key. Off: the mic opens only while you hold the key, and the first moment of each dictation waits for it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("General") {
                 Toggle("Launch at login", isOn: Binding(

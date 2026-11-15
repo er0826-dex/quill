@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The mic stays ready for a minute after you dictate (Settings: Off, 30 seconds, 1 minute, 5 minutes), so back-to-back dictations start instantly; then it closes and the indicator goes off.
+
 ## 0.4.1 (2026-11-14)
 
 - The microphone opens only while you hold the key (or while a meeting records), so the mic indicator is off when Quill is idle. The bubble appears once audio is flowing: that's the cue to speak.

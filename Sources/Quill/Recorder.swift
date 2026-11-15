@@ -2,10 +2,11 @@ import AVFoundation
 import ObjCGuard
 import FluidAudio
 
-/// The microphone is open only while it's needed: while the key is held, or while a meeting records
-/// (Eric 11/14: "only while held", so macOS's mic indicator isn't on all day). The cost is the
-/// start: the first buffer arrives 150–700 ms after the press, and `onFirstBuffer` tells the bubble
-/// when Quill is actually listening. Dictation never writes to disk. A meeting can also tee the same
+/// The microphone is open only while it's needed: while the key is held, while a meeting records, and
+/// for a short while after a dictation (`keepWarmSeconds`, Eric 11/15), so the next one starts instantly
+/// with the half second before the press. While warm it keeps only that rolling half second, in memory,
+/// and nothing is transcribed. A cold start takes 150–700 ms to deliver audio; `onFirstBuffer` tells the
+/// bubble when Quill is actually listening. Dictation never writes to disk. A meeting can also tee the same
 /// tap into numbered CAF segments (`startFile` / `stopFile`) without disturbing dictation.
 final class Recorder {
     static let sampleRate: Double = 16_000
@@ -46,7 +47,28 @@ final class Recorder {
     private var needed: Bool {
         lock.lock(); let c = capturing; lock.unlock()
         fileLock.lock(); let m = segmentSource != nil; fileLock.unlock()
-        return c || m
+        return c || m || warm
+    }
+
+    /// How long the mic stays open after a dictation (Settings; 0 = close on release).
+    static var keepWarmSeconds: Double {
+        UserDefaults.standard.object(forKey: "micWarmSeconds") as? Double ?? 60
+    }
+    private var warm = false
+    private var coolWork: DispatchWorkItem?
+
+    /// Keeps the mic open for `keepWarmSeconds` more, then closes it if nothing else needs it.
+    private func stayWarm() {
+        coolWork?.cancel()
+        let seconds = Self.keepWarmSeconds
+        guard seconds > 0 else { warm = false; closeIfIdle(); return }
+        warm = true
+        let work = DispatchWorkItem { [weak self] in
+            self?.warm = false
+            self?.closeIfIdle()
+        }
+        coolWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
     private var restartWork: DispatchWorkItem?
@@ -172,7 +194,7 @@ final class Recorder {
         let rate = inputRate
         samples.removeAll()
         lock.unlock()
-        closeIfIdle()
+        stayWarm()
         return (try? converter.resample(raw, from: rate)) ?? []
     }
 
