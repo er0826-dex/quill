@@ -52,7 +52,7 @@ final class Recorder {
 
     /// How long the mic stays open after a dictation (Settings; 0 = close on release).
     static var keepWarmSeconds: Double {
-        UserDefaults.standard.object(forKey: "micWarmSeconds") as? Double ?? 60
+        UserDefaults.standard.object(forKey: "micWarmSeconds") as? Double ?? 300
     }
     private var warm = false
     private var coolWork: DispatchWorkItem?

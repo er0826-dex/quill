@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- The mic stays ready for a minute after you dictate (Settings: Off, 30 seconds, 1 minute, 5 minutes), so back-to-back dictations start instantly; then it closes and the indicator goes off.
+- The mic stays ready for five minutes after you dictate (Settings: Off, 30 seconds, 1 minute, 5 minutes), so back-to-back dictations start instantly; then it closes and the indicator goes off.
 
 ## 0.4.1 (2026-11-14)
 
