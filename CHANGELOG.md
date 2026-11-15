@@ -1,9 +1,14 @@
 # Changelog
 
-## 0.4.0 (unreleased)
+## 0.4.1 (2026-11-14)
+
+- The microphone opens only while you hold the key (or while a meeting records), so the mic indicator is off when Quill is idle. The bubble appears once audio is flowing: that's the cue to speak.
+- The menu-bar feather turns red while listening.
+- A cleaner menu; Option-click shows timings, the log and developer items.
+
+## 0.4.0 (2026-11-14)
 
 - Meetings transcribe with Parakeet by default (seconds, no extra download); Whisper Large v3 Turbo is a choice in Settings.
-
 - Meetings are recorded to CAF files, which stay readable if Quill quits or crashes mid-meeting. The meeting folder holds `mic.caf`, `system.caf`, numbered segments and `meta.json`.
 - Recording continues through an audio device change (AirPods connecting, a headset unplugged). System audio restarts into a new numbered segment, and the menu says when a track is recovering or lost.
 - A welcome window on first run explains Microphone and Accessibility, checks them, and lets you try dictation.
