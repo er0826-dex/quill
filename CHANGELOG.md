@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 (2026-11-15)
 
+- The welcome window and Settings say plainly that Quill listens only while the feather is red.
 - The mic stays ready for five minutes after you dictate (Settings: Off, 30 seconds, 1 minute, 5 minutes), so back-to-back dictations start instantly; then it closes and the indicator goes off.
 
 ## 0.4.1 (2026-11-14)

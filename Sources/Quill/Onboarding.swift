@@ -62,7 +62,7 @@ struct OnboardingView: View {
         let status = Permissions.microphoneStatus
         return step(
             title: "Microphone",
-            why: "Quill listens only while you hold the key, and transcribes on this Mac.",
+            why: "Quill listens only while the feather is red, while you hold the key. Afterward the mic stays warm for a few minutes so the next dictation starts instantly; macOS shows its mic indicator, but nothing is recorded until you press the key.",
             granted: model.microphoneGranted,
             statusText: model.microphoneGranted ? "Granted" : status == .denied ? "Denied" : "Not yet"
         ) {

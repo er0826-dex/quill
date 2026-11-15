@@ -31,7 +31,7 @@ struct SettingsView: View {
                 .onChange(of: micWarmSeconds) { _, seconds in
                     UserDefaults.standard.set(seconds, forKey: "micWarmSeconds")
                 }
-                Text("Quill only listens while you hold the key; the feather turns red. After you let go, the mic stays open for the time above so your next dictation starts instantly, and macOS shows its mic indicator. During that time Quill keeps just the last half second on a loop in memory, writing over it as it goes: nothing is transcribed, saved or sent. Off: the mic opens only while you hold the key.")
+                Text("Quill listens only while the feather is red. Between dictations the mic stays warm so the next one starts instantly; macOS shows its mic indicator, but nothing is recorded until you press the key. Off: the mic opens only while you hold it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
