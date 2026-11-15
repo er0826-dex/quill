@@ -21,7 +21,9 @@ enum QuillState: Equatable {
     }
 
     var menuBarImage: NSImage {
-        let image = NSImage(named: iconName) ?? NSImage(systemSymbolName: "mic", accessibilityDescription: "Quill")!
+        // While listening: the plain feather, in red; no sound arcs (Eric 11/14).
+        let name = self == .listening ? "quill-idle" : iconName
+        let image = NSImage(named: name) ?? NSImage(systemSymbolName: "mic", accessibilityDescription: "Quill")!
         image.isTemplate = true
         // Red while listening, like a recording light (Eric 11/14); the template tint everywhere else.
         guard self == .listening else { return image }
