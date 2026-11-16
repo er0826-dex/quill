@@ -4,7 +4,7 @@ Hold a key, talk. It writes. Free and local. Records meetings too.
 
 Quill is a small menu-bar app for macOS. Hold Right Option, speak, let go: the text is pasted at your cursor in whatever app you're in. A small bubble beside the cursor shows your words as you say them. Everything runs on your Mac. No account, no subscription, no cloud.
 
-![Quill dictating](docs/quill-bubble.png)
+![Quill dictating: hold a key, talk, the words stream beside the cursor, then land](docs/quill-demo.gif)
 
 ## Install
 
